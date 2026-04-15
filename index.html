@@ -268,7 +268,7 @@
                                     <option value="Designed">Designed</option>
                                     <option value="Scheduled">Scheduled</option>
                                     <option value="Published">Published</option>
-                                    <option value="For Checking">For Checking</option>
+                                    <option value="Ready">Ready</option>
                                 </select>
                             </div>
                         </div>
@@ -303,11 +303,39 @@
     </div>
 </div>
 
-    <script>
+<script type="module">
+        // --- START OF FIREBASE SETUP ---
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDAVeoi7L0dTho3E3QuHs_YeazyaFMxJZg",
+            authDomain: "r8-content-calendar.firebaseapp.com",
+            projectId: "r8-content-calendar",
+            storageBucket: "r8-content-calendar.firebasestorage.app",
+            messagingSenderId: "591618653645",
+            appId: "1:591618653645:web:720119adc75363538e9884"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const calendarRef = collection(db, "tasks");
+        // --- END OF FIREBASE SETUP ---
+
+        let contents = [];
         let mainDate = new Date();
         let miniDate = new Date();
         let currentView = 'month'; 
-        let contents = JSON.parse(localStorage.getItem('designer_pro_contents') || '[]');
+
+        // REAL-TIME SYNC: Listens to the cloud 24/7
+        onSnapshot(calendarRef, (snapshot) => {
+            contents = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+            renderMainView();
+            renderMiniCalendar();
+        });
 
         function updateNavClock() {
             const now = new Date();
@@ -326,41 +354,41 @@
             return `${h}:${minutes} ${ampm}`;
         }
 
-        /* DRAG AND DROP HANDLERS */
-        function handleDragStart(e, taskId) {
+        /* CLOUD DRAG AND DROP */
+        window.handleDragStart = function(e, taskId) {
             e.dataTransfer.setData('taskId', taskId);
             e.target.style.opacity = '0.5';
-        }
+        };
 
-        function handleDragEnd(e) {
+        window.handleDragEnd = function(e) {
             e.target.style.opacity = '1';
-        }
+        };
 
-        function handleDragOver(e) {
-            e.preventDefault(); // Required to allow dropping
+        window.handleDragOver = function(e) {
+            e.preventDefault();
             e.currentTarget.classList.add('drag-over');
-        }
+        };
 
-        function handleDragLeave(e) {
+        window.handleDragLeave = function(e) {
             e.currentTarget.classList.remove('drag-over');
-        }
+        };
 
-        function handleDrop(e, newDateStr) {
+        window.handleDrop = async function(e, newDateStr) {
             e.preventDefault();
             e.currentTarget.classList.remove('drag-over');
             const taskId = e.dataTransfer.getData('taskId');
             
-            const taskIdx = contents.findIndex(t => t.id === taskId);
-            if (taskIdx > -1) {
-                contents[taskIdx].date = newDateStr;
-                localStorage.setItem('designer_pro_contents', JSON.stringify(contents));
-                renderMainView();
+            const task = contents.find(t => t.id === taskId);
+            if (task) {
+                const updatedTask = { ...task, date: newDateStr };
+                delete updatedTask.id; // ID is stored as the document name
+                await setDoc(doc(db, "tasks", taskId), updatedTask);
             }
-        }
+        };
 
-        /* LOGO & PROFILE (Unchanged) */
-        function triggerUpload() { document.getElementById('profile-upload').click(); }
-        function handleProfileUpload(event) {
+        /* LOGO & PROFILE (Local storage is fine for these) */
+        window.triggerUpload = function() { document.getElementById('profile-upload').click(); };
+        window.handleProfileUpload = function(event) {
             const file = event.target.files[0];
             if (file) {
                 const reader = new FileReader();
@@ -371,10 +399,10 @@
                 };
                 reader.readAsDataURL(file);
             }
-        }
+        };
         function updateProfileUI(imageSrc) {
             const display = document.getElementById('profile-display');
-            if (imageSrc) {
+            if (display && imageSrc) {
                 display.style.backgroundImage = `url('${imageSrc}')`;
                 display.style.backgroundSize = 'cover';
                 display.style.backgroundPosition = 'center';
@@ -384,7 +412,7 @@
         updateProfileUI(localStorage.getItem('user_profile_pic'));
 
         /* CALENDAR VIEW LOGIC */
-        function setView(view) {
+        window.setView = function(view) {
             currentView = view;
             ['month', 'week', 'day'].forEach(v => {
                 const btn = document.getElementById(`btn-${v}`);
@@ -393,19 +421,20 @@
             });
             document.getElementById(`btn-${view}`).classList.add('view-active');
             renderMainView();
-        }
+        };
 
-        function changeMainView(offset) {
+        window.changeMainView = function(offset) {
             if (currentView === 'month') { mainDate.setDate(1); mainDate.setMonth(mainDate.getMonth() + offset); } 
             else if (currentView === 'week') { mainDate.setDate(mainDate.getDate() + (offset * 7)); } 
             else if (currentView === 'day') { mainDate.setDate(mainDate.getDate() + offset); }
             renderMainView();
-        }
+        };
 
         function renderMainView() {
             const container = document.getElementById('main-calendar-body');
             const label = document.getElementById('main-view-label');
             const header = document.getElementById('calendar-header-row');
+            if(!container) return;
             container.innerHTML = ''; header.innerHTML = '';
             const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -431,7 +460,7 @@
                 header.innerHTML = `<div class="header-cell text-[10px] font-bold text-slate-400 uppercase tracking-widest">Selected Day</div>`;
                 renderDayView();
             }
-            lucide.createIcons();
+            if(window.lucide) lucide.createIcons();
         }
 
         function renderMonthView() {
@@ -467,11 +496,9 @@
         function createDayCard(dateStr, dayNum) {
             const div = document.createElement('div');
             div.className = 'day-card p-3 flex flex-col group relative bg-white';
-            
-            // Drag & Drop events for the DAY CARD
-            div.ondragover = handleDragOver;
-            div.ondragleave = handleDragLeave;
-            div.ondrop = (e) => handleDrop(e, dateStr);
+            div.ondragover = window.handleDragOver;
+            div.ondragleave = window.handleDragLeave;
+            div.ondrop = (e) => window.handleDrop(e, dateStr);
 
             const todayStr = new Date().toDateString();
             const isToday = todayStr === new Date(dateStr).toDateString();
@@ -491,30 +518,19 @@
                 const container = document.getElementById(`tasks-${dateStr}`);
                 if (!container) return;
                 container.innerHTML = '';
-
-                // 1. Filter and then SORT the tasks
                 const dayTasks = contents.filter(t => t.date === dateStr);
                 
-                dayTasks.sort((a, b) => {
-                    // If no time is set, we push it to the bottom
-                    if (!a.postTime) return 1;
-                    if (!b.id) return -1;
-                    // Standard string comparison works perfectly for 24hr time strings
-                    return a.postTime.localeCompare(b.postTime);
-                });
+                dayTasks.sort((a, b) => (a.postTime || 'zz').localeCompare(b.postTime || 'zz'));
 
-                // 2. Render the sorted tasks
                 dayTasks.forEach(task => {
                     const btn = document.createElement('button');
                     btn.className = `calendar-item text-left p-2 rounded-xl border border-slate-200 bg-white shadow-sm hover:border-blue-400 transition-all mb-1 block`;
-                    
                     btn.draggable = true;
-                    btn.ondragstart = (e) => handleDragStart(e, task.id);
-                    btn.ondragend = handleDragEnd;
-                    
+                    btn.ondragstart = (e) => window.handleDragStart(e, task.id);
+                    btn.ondragend = window.handleDragEnd;
                     btn.onclick = (e) => { e.stopPropagation(); openModal(dateStr, task.id); };
-                    const displayTime = formatTimeTo12hr(task.postTime);
                     
+                    const displayTime = formatTimeTo12hr(task.postTime);
                     btn.innerHTML = `
                         <div class="text-[10px] font-bold text-slate-700 truncate mb-1">
                             ${displayTime ? '<span class="text-black-500">[' + displayTime + ']</span> ' : ''}${task.topic}
@@ -523,16 +539,18 @@
                     `;
                     container.appendChild(btn);
                 });
-                lucide.createIcons();
+                if(window.lucide) lucide.createIcons();
             }, 0);
         }
 
-        /* OTHER FUNCTIONS (Unchanged) */
-        function changeMiniMonth(offset) { miniDate.setDate(1); miniDate.setMonth(miniDate.getMonth() + offset); renderMiniCalendar(); }
-        function goToToday() { mainDate = new Date(); miniDate = new Date(); renderMainView(); renderMiniCalendar(); }
+        /* MODAL & DATA OPS */
+        window.changeMiniMonth = function(offset) { miniDate.setDate(1); miniDate.setMonth(miniDate.getMonth() + offset); renderMiniCalendar(); };
+        window.goToToday = function() { mainDate = new Date(); miniDate = new Date(); renderMainView(); renderMiniCalendar(); };
+        
         function renderMiniCalendar() {
             const body = document.getElementById('mini-calendar-body');
             const display = document.getElementById('mini-month-display');
+            if(!body) return;
             body.innerHTML = ''; const year = miniDate.getFullYear(); const month = miniDate.getMonth();
             display.innerText = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(miniDate);
             const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -542,7 +560,8 @@
                 body.innerHTML += `<div class="text-[10px] py-1 text-center font-medium ${isToday ? 'bg-blue-600 text-white rounded-full' : 'text-slate-500'}">${d}</div>`;
             }
         }
-        function handleSearch() {
+
+        window.handleSearch = function() {
             const query = document.getElementById('global-search').value.toLowerCase();
             const results = document.getElementById('search-results');
             if (!query) { results.classList.add('hidden'); return; }
@@ -551,33 +570,22 @@
             if (filtered.length > 0) {
                 results.classList.remove('hidden');
                 filtered.forEach(item => {
-            const div = document.createElement('div');
-            div.className = 'p-3 hover:bg-slate-50 cursor-pointer text-xs border-b border-slate-50 last:border-0 transition-colors';
-            div.onclick = () => { openModal(item.date, item.id); results.classList.add('hidden'); };
-            
-            // Format the date properly
-            const fullDate = new Date(item.date).toLocaleDateString('en-US', { 
-                month: 'long', 
-                day: 'numeric', 
-                year: 'numeric' 
-            });
-
-            div.innerHTML = `
-                <div class="flex justify-between items-center">
-                    <b class="text-slate-700">${item.topic}</b>
-                    <span class="text-[10px] font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full">${fullDate}</span>
-                </div>
-            `;
-            results.appendChild(div);
-        });
+                    const div = document.createElement('div');
+                    div.className = 'p-3 hover:bg-slate-50 cursor-pointer text-xs border-b border-slate-50 last:border-0 transition-colors';
+                    div.onclick = () => { openModal(item.date, item.id); results.classList.add('hidden'); };
+                    const fullDate = new Date(item.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                    div.innerHTML = `<div class="flex justify-between items-center"><b class="text-slate-700">${item.topic}</b><span class="text-[10px] font-bold text-blue-500 bg-blue-50 px-2 py-0.5 rounded-full">${fullDate}</span></div>`;
+                    results.appendChild(div);
+                });
             } else { results.innerHTML = '<div class="p-4 text-xs text-slate-400 text-center">No results</div>'; results.classList.remove('hidden'); }
-        }
-        function openModal(dateStr, taskId = null) {
+        };
+
+        window.openModal = function(dateStr, taskId = null) {
             document.getElementById('modal').classList.remove('hidden');
             document.getElementById('content-form').reset();
             document.getElementById('selected-date').value = dateStr;
-            const dateObj = new Date(dateStr);
-            document.getElementById('modal-date-display').innerText = dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+            document.getElementById('modal-date-display').innerText = new Date(dateStr).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+            
             if (taskId) {
                 const task = contents.find(t => t.id === taskId);
                 document.getElementById('edit-id').value = task.id;
@@ -592,36 +600,57 @@
                 document.getElementById('approval').value = task.approval;
                 document.getElementById('deleteBtn').classList.remove('hidden');
                 document.getElementById('modal-title').innerText = "Edit Content";
-            } else { document.getElementById('edit-id').value = ''; document.getElementById('deleteBtn').classList.add('hidden'); document.getElementById('modal-title').innerText = "New Content"; }
-            toggleTypeFields(); lucide.createIcons();
-        }
-        function toggleTypeFields() {
+            } else { 
+                document.getElementById('edit-id').value = ''; 
+                document.getElementById('deleteBtn').classList.add('hidden'); 
+                document.getElementById('modal-title').innerText = "New Content"; 
+            }
+            toggleTypeFields(); 
+            if(window.lucide) lucide.createIcons();
+        };
+
+        window.toggleTypeFields = function() {
             const type = document.getElementById('contentType').value;
-            if (type === 'Reel') { document.getElementById('pageNumberGroup').classList.add('hidden'); document.getElementById('softwareGroup').classList.remove('hidden'); } 
-            else { document.getElementById('pageNumberGroup').classList.remove('hidden'); document.getElementById('softwareGroup').classList.add('hidden'); }
-        }
-        function closeModal() { document.getElementById('modal').classList.add('hidden'); }
-        document.getElementById('content-form').onsubmit = (e) => {
+            const pgGroup = document.getElementById('pageNumberGroup');
+            const swGroup = document.getElementById('softwareGroup');
+            if (type === 'Reel') { pgGroup.classList.add('hidden'); swGroup.classList.remove('hidden'); } 
+            else { pgGroup.classList.remove('hidden'); swGroup.classList.add('hidden'); }
+        };
+
+        window.closeModal = function() { document.getElementById('modal').classList.add('hidden'); };
+
+        // CLOUD SAVE
+        document.getElementById('content-form').onsubmit = async (e) => {
             e.preventDefault();
             const id = document.getElementById('edit-id').value || "task_" + Date.now();
             const data = {
-                id, date: document.getElementById('selected-date').value,
-                topic: document.getElementById('topic').value, pillar: document.getElementById('pillar').value,
-                contentType: document.getElementById('contentType').value, postTime: document.getElementById('postTime').value,
-                pageNumber: document.getElementById('pageNumber').value, softwareLink: document.getElementById('softwareLink').value,
-                status: document.getElementById('status').value, caption: document.getElementById('caption').value, approval: document.getElementById('approval').value
+                date: document.getElementById('selected-date').value,
+                topic: document.getElementById('topic').value, 
+                pillar: document.getElementById('pillar').value,
+                contentType: document.getElementById('contentType').value, 
+                postTime: document.getElementById('postTime').value,
+                pageNumber: document.getElementById('pageNumber').value, 
+                softwareLink: document.getElementById('softwareLink').value,
+                status: document.getElementById('status').value, 
+                caption: document.getElementById('caption').value, 
+                approval: document.getElementById('approval').value
             };
-            const idx = contents.findIndex(t => t.id === id);
-            if (idx > -1) contents[idx] = data; else contents.push(data);
-            localStorage.setItem('designer_pro_contents', JSON.stringify(contents));
-            closeModal(); renderMainView();
+            await setDoc(doc(db, "tasks", id), data);
+            closeModal();
         };
-        function deleteTask() {
+
+        // CLOUD DELETE
+        window.deleteTask = async function() {
             const id = document.getElementById('edit-id').value;
-            if(confirm('Delete?')) { contents = contents.filter(t => t.id !== id); localStorage.setItem('designer_pro_contents', JSON.stringify(contents)); closeModal(); renderMainView(); }
-        }
-        function triggerLogoUpload() { document.getElementById('logo-upload').click(); }
-        function handleLogoUpload(event) {
+            if(id && confirm('Delete from cloud?')) { 
+                await deleteDoc(doc(db, "tasks", id));
+                closeModal(); 
+            }
+        };
+
+        /* LOGO HANDLING */
+        window.triggerLogoUpload = function() { document.getElementById('logo-upload').click(); };
+        window.handleLogoUpload = function(event) {
             const file = event.target.files[0];
             if (file) {
                 const reader = new FileReader();
@@ -632,38 +661,33 @@
                 };
                 reader.readAsDataURL(file);
             }
-        }
-                function updateLogoUI(imageSrc) {
+        };
+        function updateLogoUI(imageSrc) {
             const display = document.getElementById('logo-display');
             const icon = document.getElementById('logo-icon');
-
-            if (imageSrc) {
-                // 1. Update the UI inside the app
+            if (display && imageSrc) {
                 display.style.backgroundImage = `url('${imageSrc}')`;
                 display.style.backgroundSize = 'cover';
                 display.style.backgroundPosition = 'center';
                 display.classList.remove('bg-blue-600');
                 if (icon) icon.style.display = 'none';
-
-                // 2. Update the Favicon (Browser Tab Icon)
                 let link = document.getElementById('favicon') || document.querySelector("link[rel~='icon']");
-                
                 if (!link) {
                     link = document.createElement('link');
                     link.id = 'favicon';
                     link.rel = 'icon';
                     document.head.appendChild(link);
                 }
-                
                 link.href = imageSrc;
-                console.log("Favicon updated to:", imageSrc.substring(0, 30) + "...");
             }
         }
         updateLogoUI(localStorage.getItem('app_custom_logo'));
+
         function getStatusColor(status) {
-            const colors = { 'In Progress': 'bg-blue-50 text-blue-600', 'To Revise': 'bg-orange-50 text-orange-600', 'Designed': 'bg-purple-50 text-purple-600', 'Scheduled': 'bg-indigo-50 text-indigo-600', 'Published': 'bg-green-50 text-green-600', 'For Checking': 'bg-rose-50 text-rose-600', 'None': 'bg-slate-100 text-slate-500' };
+            const colors = { 'In Progress': 'bg-blue-50 text-blue-600', 'To Revise': 'bg-orange-50 text-orange-600', 'Designed': 'bg-purple-50 text-purple-600', 'Scheduled': 'bg-indigo-50 text-indigo-600', 'Published': 'bg-green-50 text-green-600', 'Ready': 'bg-rose-50 text-rose-600', 'None': 'bg-slate-100 text-slate-500' };
             return colors[status] || 'bg-slate-100';
         }
+
         window.onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
         renderMainView(); renderMiniCalendar();
     </script>
